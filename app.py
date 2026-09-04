@@ -3,26 +3,36 @@ import pandas as pd
 import plotly.express as px
 import requests
 from datetime import datetime, date
-import calendar
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Duty Tracker", page_icon="📋", layout="wide")
 
-# PASTE YOUR APPS SCRIPT WEB APP URL HERE
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxGqPAoO0nu0-pppHjyJTBO8ltNC3XEjwXRsVsNBOP4uY8vXsQArSiICPbjLzeJ438/exec"
 
-# --- DATA HANDLING (Via Apps Script API) ---
+# --- DATA HANDLING ---
 def load_data():
     try:
         response = requests.get(WEBAPP_URL)
         data = response.json()
         
-        if len(data) <= 1: # Only headers or empty sheet
+        if len(data) <= 1: 
             return pd.DataFrame(columns=["Date", "Shift", "Post", "Duty_Type", "Timestamp"])
             
         headers = data[0]
         rows = data[1:]
-        return pd.DataFrame(rows, columns=headers)
+        df = pd.DataFrame(rows, columns=headers)
+        
+        # --- FIX FOR THE TIMEZONE SHIFT ISSUE ---
+        df['Date'] = pd.to_datetime(df['Date'])
+        if df['Date'].dt.tz is not None:
+            # Convert UTC back to IST to prevent dates from shifting backwards a day
+            df['Date'] = df['Date'].dt.tz_convert('Asia/Kolkata').dt.tz_localize(None)
+        
+        # Strip away the time so it acts as a pure date
+        df['Date'] = df['Date'].dt.date 
+        df['Date'] = pd.to_datetime(df['Date']) 
+        
+        return df
     except Exception as e:
         st.error("Failed to connect to Google Sheets.")
         return pd.DataFrame(columns=["Date", "Shift", "Post", "Duty_Type", "Timestamp"])
@@ -39,21 +49,18 @@ def save_data(date_val, shift, post, duty_type):
         "Duty_Type": duty_type,
         "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-    
-    # Send data to Google Apps Script POST endpoint
     requests.post(WEBAPP_URL, json=payload)
 
-# --- UI NAVIGATION ---
-st.sidebar.title("📋 Duty Tracker")
-menu = st.sidebar.radio("Navigation", ["📝 New Entry", "📊 Dashboard"])
+# --- MAIN SCREEN UI ---
+st.title("📋 Duty Tracker")
+st.markdown("Track your everyday shifts and monitor your monthly duty statistics.")
 
-df = load_data()
+# Replaced Sidebar with Main Screen Tabs
+tab1, tab2 = st.tabs(["📝 New Entry", "📊 Interactive Dashboard"])
 
 # --- TAB 1: ENTRY FORM ---
-if menu == "📝 New Entry":
-    st.title("Log Your Duty")
-    st.markdown("Fill out the details below. Data saves directly to Google Sheets via Webhook.")
-    
+with tab1:
+    st.subheader("Log Your Duty")
     with st.form("duty_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         
@@ -76,17 +83,23 @@ if menu == "📝 New Entry":
                 st.success(f"✅ Successfully logged {duty_type} duty for {duty_date} at post {post} (Shift {shift}).")
 
 # --- TAB 2: DASHBOARD ---
-elif menu == "📊 Dashboard":
-    st.title("Interactive Duty Dashboard")
-    st.button("🔄 Refresh Data")
+with tab2:
+    df = load_data()
+    
+    col_title, col_btn = st.columns([0.85, 0.15])
+    with col_title:
+        st.subheader("Monthly Overview")
+    with col_btn:
+        if st.button("🔄 Refresh Data", use_container_width=True):
+            st.rerun()
     
     if df.empty:
         st.info("No records found in the Google Sheet. Submit some entries to see the dashboard.")
     else:
-        df['Date'] = pd.to_datetime(df['Date'])
         current_month = datetime.now().month
         current_year = datetime.now().year
         
+        # Filter for the current month ONLY
         df_month = df[(df['Date'].dt.month == current_month) & (df['Date'].dt.year == current_year)]
         
         total_daily = len(df_month[df_month['Duty_Type'] == "Daily"])
@@ -94,11 +107,11 @@ elif menu == "📊 Dashboard":
         total_leave = len(df_month[df_month['Duty_Type'] == "Leave"])
         
         # --- METRICS ---
-        st.markdown("### 📅 Current Month Overview")
-        m1, m2, m3 = st.columns(3)
+        m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Regular Duties", total_daily)
         m2.metric("Total OTs", total_ot)
         m3.metric("Logged Leaves", total_leave)
+        m4.metric("Total Shifts Worked", total_daily + total_ot)
         
         st.divider()
         
@@ -106,22 +119,34 @@ elif menu == "📊 Dashboard":
         col_chart1, col_chart2 = st.columns(2)
         
         with col_chart1:
-            st.markdown("#### Duty by Post (Excluding Leaves)")
-            df_worked = df[df['Duty_Type'] != "Leave"]
+            st.markdown("#### 🎯 Duty by Post")
+            df_worked = df_month[df_month['Duty_Type'] != "Leave"]
             if not df_worked.empty:
                 post_counts = df_worked['Post'].value_counts().reset_index()
                 post_counts.columns = ['Post', 'Count']
-                fig_post = px.pie(post_counts, values='Count', names='Post', hole=0.4, color_discrete_sequence=px.colors.sequential.Teal)
+                fig_post = px.pie(post_counts, values='Count', names='Post', hole=0.4, 
+                                  color_discrete_sequence=px.colors.sequential.Teal)
+                fig_post.update_traces(textposition='inside', textinfo='percent+label')
+                fig_post.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
                 st.plotly_chart(fig_post, use_container_width=True)
             else:
-                st.info("No active duty posts logged yet.")
+                st.info("No active duty posts logged this month.")
             
         with col_chart2:
-            st.markdown("#### Activity over Time")
-            daily_counts = df.groupby(['Date', 'Duty_Type']).size().reset_index(name='Count')
-            fig_trend = px.bar(daily_counts, x='Date', y='Count', color='Duty_Type', barmode='group')
-            st.plotly_chart(fig_trend, use_container_width=True)
+            st.markdown("#### 📈 Activity over Time")
+            if not df_month.empty:
+                daily_counts = df_month.groupby(['Date', 'Duty_Type']).size().reset_index(name='Count')
+                fig_trend = px.bar(daily_counts, x='Date', y='Count', color='Duty_Type', 
+                                   barmode='group', color_discrete_map={"Daily": "#1f77b4", "OT (Overtime)": "#ff7f0e", "Leave": "#d62728"})
+                fig_trend.update_layout(xaxis_title="", yaxis_title="Number of Shifts", margin=dict(t=0, b=0, l=0, r=0))
+                st.plotly_chart(fig_trend, use_container_width=True)
+            else:
+                st.info("No activity logged this month.")
             
         # --- RAW DATA ---
-        st.markdown("### 🗄️ Recent Records (Live from Google Sheets)")
-        st.dataframe(df.sort_values(by="Date", ascending=False).head(10), use_container_width=True, hide_index=True)
+        st.markdown("### 🗄️ Recent Records (Live)")
+        
+        # Format dates nicely to remove the confusing 00:00:00 timestamps in the table
+        df_display = df.copy()
+        df_display['Date'] = df_display['Date'].dt.strftime('%Y-%m-%d')
+        st.dataframe(df_display.sort_values(by="Date", ascending=False).head(10), use_container_width=True, hide_index=True)

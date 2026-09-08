@@ -11,7 +11,7 @@ import extra_streamlit_components as stx
 st.set_page_config(page_title="Duty Tracker", page_icon="📋", layout="wide")
 
 # PASTE YOUR NEW DEPLOYMENT URL HERE
-WEBAPP_URL = "YOUR_NEW_WEBAPP_URL_HERE"
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzh46p4uBw3QDBk4_ObntV2FcPJxdb6PnmtFxjQ1EgbRB3svnHDV_kgAQ2wBbLE9Due/exec"
 
 # --- COOKIE MANAGER (For Persistent Login) ---
 @st.cache_resource(experimental_allow_widgets=True)

@@ -7,7 +7,7 @@ from datetime import datetime, date
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Duty Tracker", page_icon="📋", layout="wide")
 
-WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyTCymBHrWM8DLUtjcT2YoR3lt4-1COjAq9OFwEatmj6Z58gq8m1vVQhY778CR8NzBo/exec"
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycbz2xeBNuAwjw4EDRJyJVw3sMUc8m6ArAmBzgDrP8sgr3cDSn_gMwNiXC-jwtYMlXKcL/exec"
 
 # --- DATA HANDLING ---
 def load_data():
@@ -22,17 +22,13 @@ def load_data():
         rows = data[1:]
         df = pd.DataFrame(rows, columns=headers)
         
-        # --- FIX FOR THE TIMEZONE SHIFT ISSUE ---
         df['Date'] = pd.to_datetime(df['Date'])
         if df['Date'].dt.tz is not None:
             df['Date'] = df['Date'].dt.tz_convert('Asia/Kolkata').dt.tz_localize(None)
         
-        df['Date'] = df['Date'].dt.date 
-        df['Date'] = pd.to_datetime(df['Date']) 
-        
+        df['Date'] = pd.to_datetime(df['Date'].dt.date)
         return df
     except Exception as e:
-        st.error("Failed to connect to Google Sheets.")
         return pd.DataFrame(columns=["Date", "Shift", "Post", "Duty_Type", "Timestamp"])
 
 def save_data(date_val, shift, post, duty_type):
@@ -50,15 +46,16 @@ def save_data(date_val, shift, post, duty_type):
     }
     requests.post(WEBAPP_URL, json=payload)
 
-def delete_data(date_str, shift, post, duty_type):
+def delete_data(timestamp):
     payload = {
         "action": "delete",
-        "Date": str(date_str),
-        "Shift": str(shift),
-        "Post": str(post),
-        "Duty_Type": str(duty_type)
+        "Timestamp": str(timestamp)
     }
-    requests.post(WEBAPP_URL, json=payload)
+    try:
+        res = requests.post(WEBAPP_URL, json=payload)
+        return res.json()
+    except Exception:
+        return {"status": "error"}
 
 # --- MAIN SCREEN UI ---
 st.title("📋 Duty Tracker")
@@ -113,7 +110,6 @@ with tab2:
         total_ot = len(df_month[df_month['Duty_Type'] == "OT (Overtime)"])
         total_leave = len(df_month[df_month['Duty_Type'] == "Leave"])
         
-        # --- METRICS ---
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Regular Duties", total_daily)
         m2.metric("Total OTs", total_ot)
@@ -122,17 +118,14 @@ with tab2:
         
         st.divider()
         
-        # --- CHARTS ---
         col_chart1, col_chart2 = st.columns(2)
-        
         with col_chart1:
             st.markdown("#### 🎯 Duty by Post")
             df_worked = df_month[df_month['Duty_Type'] != "Leave"]
             if not df_worked.empty:
                 post_counts = df_worked['Post'].value_counts().reset_index()
                 post_counts.columns = ['Post', 'Count']
-                fig_post = px.pie(post_counts, values='Count', names='Post', hole=0.4, 
-                                  color_discrete_sequence=px.colors.sequential.Teal)
+                fig_post = px.pie(post_counts, values='Count', names='Post', hole=0.4, color_discrete_sequence=px.colors.sequential.Teal)
                 fig_post.update_traces(textposition='inside', textinfo='percent+label')
                 fig_post.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
                 st.plotly_chart(fig_post, use_container_width=True)
@@ -143,20 +136,17 @@ with tab2:
             st.markdown("#### 📈 Activity over Time")
             if not df_month.empty:
                 daily_counts = df_month.groupby(['Date', 'Duty_Type']).size().reset_index(name='Count')
-                fig_trend = px.bar(daily_counts, x='Date', y='Count', color='Duty_Type', 
-                                   barmode='group', color_discrete_map={"Daily": "#1f77b4", "OT (Overtime)": "#ff7f0e", "Leave": "#d62728"})
+                fig_trend = px.bar(daily_counts, x='Date', y='Count', color='Duty_Type', barmode='group', color_discrete_map={"Daily": "#1f77b4", "OT (Overtime)": "#ff7f0e", "Leave": "#d62728"})
                 fig_trend.update_layout(xaxis_title="", yaxis_title="Number of Shifts", margin=dict(t=0, b=0, l=0, r=0))
                 st.plotly_chart(fig_trend, use_container_width=True)
             else:
                 st.info("No activity logged this month.")
             
-        # --- RAW DATA & DELETE FUNCTION ---
         st.markdown("### 🗄️ Recent Records (Live)")
         
         df_display = df.copy()
         df_display['Date_Str'] = df_display['Date'].dt.strftime('%Y-%m-%d')
         
-        # Display table without Timestamp
         st.dataframe(
             df_display.drop(columns=['Timestamp', 'Date'])
                       .rename(columns={'Date_Str': 'Date'})
@@ -169,10 +159,11 @@ with tab2:
         st.markdown("#### 🗑️ Remove an Entry")
         st.caption("Select an incorrect or duplicate entry from the dropdown below to delete it.")
         
+        # Link UI selection back to the hidden Timestamp string
         delete_options = {}
         for _, row in df_display.sort_values(by="Date", ascending=False).head(30).iterrows():
             record_label = f"{row['Date_Str']} | {row['Duty_Type']} | Shift: {row['Shift']} | Post: {row['Post']}"
-            delete_options[record_label] = row
+            delete_options[record_label] = row['Timestamp']
             
         if delete_options:
             col_del1, col_del2 = st.columns([0.8, 0.2])
@@ -180,13 +171,12 @@ with tab2:
                 selected_label = st.selectbox("Select entry to delete:", options=list(delete_options.keys()), label_visibility="collapsed")
             with col_del2:
                 if st.button("Delete Entry", type="primary", use_container_width=True):
-                    selected_row = delete_options[selected_label]
                     with st.spinner("Deleting entry..."):
-                        delete_data(
-                            date_str=selected_row['Date_Str'],
-                            shift=selected_row['Shift'],
-                            post=selected_row['Post'],
-                            duty_type=selected_row['Duty_Type']
-                        )
-                    st.success("✅ Entry deleted successfully!")
-                    st.rerun()
+                        # Get exact Timestamp mapping and delete
+                        response_data = delete_data(delete_options[selected_label])
+                        
+                    if response_data.get("status") == "deleted":
+                        st.success("✅ Entry deleted successfully!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to delete. Make sure you deployed the new Apps Script version.")

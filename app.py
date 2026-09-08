@@ -7,7 +7,7 @@ from datetime import datetime, date
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Duty Tracker", page_icon="📋", layout="wide")
 
-WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxGqPAoO0nu0-pppHjyJTBO8ltNC3XEjwXRsVsNBOP4uY8vXsQArSiICPbjLzeJ438/exec"
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyTCymBHrWM8DLUtjcT2YoR3lt4-1COjAq9OFwEatmj6Z58gq8m1vVQhY778CR8NzBo/exec"
 
 # --- DATA HANDLING ---
 def load_data():

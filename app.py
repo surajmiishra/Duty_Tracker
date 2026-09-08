@@ -4,13 +4,21 @@ import plotly.express as px
 import requests
 import hashlib
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
+import extra_streamlit_components as stx
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Duty Tracker", page_icon="📋", layout="wide")
 
 # PASTE YOUR NEW DEPLOYMENT URL HERE
-WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzh46p4uBw3QDBk4_ObntV2FcPJxdb6PnmtFxjQ1EgbRB3svnHDV_kgAQ2wBbLE9Due/exec"
+WEBAPP_URL = "YOUR_NEW_WEBAPP_URL_HERE"
+
+# --- COOKIE MANAGER (For Persistent Login) ---
+@st.cache_resource(experimental_allow_widgets=True)
+def get_cookie_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_cookie_manager()
 
 # --- AUTH & SESSION STATE ---
 if "logged_in" not in st.session_state:
@@ -22,14 +30,29 @@ if "first_name" not in st.session_state:
 if "show_welcome_animation" not in st.session_state:
     st.session_state.show_welcome_animation = False
 
+# Auto-login check (reads cookies on app load)
+if not st.session_state.logged_in:
+    saved_email = cookie_manager.get("duty_email")
+    saved_name = cookie_manager.get("duty_name")
+    if saved_email and saved_name:
+        st.session_state.logged_in = True
+        st.session_state.email = saved_email
+        st.session_state.first_name = saved_name
+        st.session_state.show_welcome_animation = False # Skip animation on silent re-login
+
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def logout():
+    # Clear session state
     st.session_state.logged_in = False
     st.session_state.email = ""
     st.session_state.first_name = ""
     st.session_state.show_welcome_animation = False
+    # Clear browser cookies
+    cookie_manager.delete("duty_email")
+    cookie_manager.delete("duty_name")
+    time.sleep(0.5) # Give the browser a moment to delete the cookie
     st.rerun()
 
 # --- API HANDLERS ---
@@ -102,10 +125,17 @@ if not st.session_state.logged_in:
                     with st.spinner("Authenticating..."):
                         res = authenticate("login", log_email, log_pass)
                         if res.get("status") == "success":
+                            # Update session state
                             st.session_state.logged_in = True
                             st.session_state.email = log_email.strip().lower()
                             st.session_state.first_name = res.get("first_name", "User")
                             st.session_state.show_welcome_animation = True
+                            
+                            # Set persistent cookies (expires in 30 days)
+                            cookie_manager.set("duty_email", st.session_state.email, max_age=30*24*60*60)
+                            cookie_manager.set("duty_name", st.session_state.first_name, max_age=30*24*60*60)
+                            
+                            time.sleep(0.5) # Wait briefly for cookie to register
                             st.rerun()
                         else:
                             st.error("Invalid email or password.")
@@ -132,7 +162,7 @@ if not st.session_state.logged_in:
 
 # --- UI: MAIN APPLICATION ---
 else:
-    # Trigger login animation exactly once
+    # Trigger login animation exactly once after manual login
     if st.session_state.show_welcome_animation:
         st.toast(f"Welcome back, {st.session_state.first_name}!", icon="🎉")
         st.balloons()

@@ -7,7 +7,7 @@ from datetime import datetime, date
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Duty Tracker", page_icon="📋", layout="wide")
 
-WEBAPP_URL = "https://script.google.com/macros/s/AKfycbz2xeBNuAwjw4EDRJyJVw3sMUc8m6ArAmBzgDrP8sgr3cDSn_gMwNiXC-jwtYMlXKcL/exec"
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyfYzeuKYyiY83gFEavsSIv5RVb0O7B2oh3nacKPX5eR9cjoD9rXKf8NSMzA7sq5VM/exec"
 
 # --- DATA HANDLING ---
 def load_data():
@@ -16,11 +16,18 @@ def load_data():
         data = response.json()
         
         if len(data) <= 1: 
-            return pd.DataFrame(columns=["Date", "Shift", "Post", "Duty_Type", "Timestamp"])
+            return pd.DataFrame(columns=["Sheet_Row", "Date", "Shift", "Post", "Duty_Type", "Timestamp"])
             
         headers = data[0]
         rows = data[1:]
-        df = pd.DataFrame(rows, columns=headers)
+        
+        # Attach the exact Google Sheet row number (index 0 is row 2 in sheets)
+        formatted_rows = []
+        for idx, row in enumerate(rows):
+            sheet_row_num = idx + 2  
+            formatted_rows.append([sheet_row_num] + row)
+            
+        df = pd.DataFrame(formatted_rows, columns=["Sheet_Row"] + headers)
         
         df['Date'] = pd.to_datetime(df['Date'])
         if df['Date'].dt.tz is not None:
@@ -29,7 +36,7 @@ def load_data():
         df['Date'] = pd.to_datetime(df['Date'].dt.date)
         return df
     except Exception as e:
-        return pd.DataFrame(columns=["Date", "Shift", "Post", "Duty_Type", "Timestamp"])
+        return pd.DataFrame(columns=["Sheet_Row", "Date", "Shift", "Post", "Duty_Type", "Timestamp"])
 
 def save_data(date_val, shift, post, duty_type):
     if duty_type == "Leave":
@@ -46,10 +53,10 @@ def save_data(date_val, shift, post, duty_type):
     }
     requests.post(WEBAPP_URL, json=payload)
 
-def delete_data(timestamp):
+def delete_data_by_row(sheet_row):
     payload = {
         "action": "delete",
-        "Timestamp": str(timestamp)
+        "row": int(sheet_row)
     }
     try:
         res = requests.post(WEBAPP_URL, json=payload)
@@ -148,7 +155,7 @@ with tab2:
         df_display['Date_Str'] = df_display['Date'].dt.strftime('%Y-%m-%d')
         
         st.dataframe(
-            df_display.drop(columns=['Timestamp', 'Date'])
+            df_display.drop(columns=['Sheet_Row', 'Timestamp', 'Date'])
                       .rename(columns={'Date_Str': 'Date'})
                       .sort_values(by="Date", ascending=False)
                       .head(10), 
@@ -159,11 +166,10 @@ with tab2:
         st.markdown("#### 🗑️ Remove an Entry")
         st.caption("Select an incorrect or duplicate entry from the dropdown below to delete it.")
         
-        # Link UI selection back to the hidden Timestamp string
         delete_options = {}
         for _, row in df_display.sort_values(by="Date", ascending=False).head(30).iterrows():
             record_label = f"{row['Date_Str']} | {row['Duty_Type']} | Shift: {row['Shift']} | Post: {row['Post']}"
-            delete_options[record_label] = row['Timestamp']
+            delete_options[record_label] = row['Sheet_Row']
             
         if delete_options:
             col_del1, col_del2 = st.columns([0.8, 0.2])
@@ -172,11 +178,10 @@ with tab2:
             with col_del2:
                 if st.button("Delete Entry", type="primary", use_container_width=True):
                     with st.spinner("Deleting entry..."):
-                        # Get exact Timestamp mapping and delete
-                        response_data = delete_data(delete_options[selected_label])
+                        response_data = delete_data_by_row(delete_options[selected_label])
                         
                     if response_data.get("status") == "deleted":
                         st.success("✅ Entry deleted successfully!")
                         st.rerun()
                     else:
-                        st.error("❌ Failed to delete. Make sure you deployed the new Apps Script version.")
+                        st.error("❌ Failed to delete. Check if 'Who has access' is set to 'Anyone' in your Apps Script deployment.")

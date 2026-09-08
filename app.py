@@ -50,10 +50,13 @@ def save_data(date_val, shift, post, duty_type):
     }
     requests.post(WEBAPP_URL, json=payload)
 
-def delete_data(timestamp):
+def delete_data(date_str, shift, post, duty_type):
     payload = {
         "action": "delete",
-        "Timestamp": timestamp
+        "Date": str(date_str),
+        "Shift": str(shift),
+        "Post": str(post),
+        "Duty_Type": str(duty_type)
     }
     requests.post(WEBAPP_URL, json=payload)
 
@@ -154,23 +157,36 @@ with tab2:
         df_display['Date_Str'] = df_display['Date'].dt.strftime('%Y-%m-%d')
         
         # Display table without Timestamp
-        st.dataframe(df_display.drop(columns=['Timestamp', 'Date']).rename(columns={'Date_Str': 'Date'}).sort_values(by="Date", ascending=False).head(10), use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_display.drop(columns=['Timestamp', 'Date'])
+                      .rename(columns={'Date_Str': 'Date'})
+                      .sort_values(by="Date", ascending=False)
+                      .head(10), 
+            use_container_width=True, 
+            hide_index=True
+        )
         
         st.markdown("#### 🗑️ Remove an Entry")
         st.caption("Select an incorrect or duplicate entry from the dropdown below to delete it.")
         
-        # Create a dictionary to map a readable string to the hidden Timestamp
         delete_options = {}
         for _, row in df_display.sort_values(by="Date", ascending=False).head(30).iterrows():
             record_label = f"{row['Date_Str']} | {row['Duty_Type']} | Shift: {row['Shift']} | Post: {row['Post']}"
-            delete_options[record_label] = row['Timestamp']
+            delete_options[record_label] = row
             
         if delete_options:
             col_del1, col_del2 = st.columns([0.8, 0.2])
             with col_del1:
-                selected_record = st.selectbox("Select entry to delete:", options=list(delete_options.keys()), label_visibility="collapsed")
+                selected_label = st.selectbox("Select entry to delete:", options=list(delete_options.keys()), label_visibility="collapsed")
             with col_del2:
                 if st.button("Delete Entry", type="primary", use_container_width=True):
-                    with st.spinner("Deleting..."):
-                        delete_data(delete_options[selected_record])
-                    st.success("✅ Deleted! Click 'Refresh Data' above to update.")
+                    selected_row = delete_options[selected_label]
+                    with st.spinner("Deleting entry..."):
+                        delete_data(
+                            date_str=selected_row['Date_Str'],
+                            shift=selected_row['Shift'],
+                            post=selected_row['Post'],
+                            duty_type=selected_row['Duty_Type']
+                        )
+                    st.success("✅ Entry deleted successfully!")
+                    st.rerun()

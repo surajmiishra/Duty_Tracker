@@ -4,7 +4,8 @@ import plotly.express as px
 import requests
 import hashlib
 import time
-from datetime import datetime, date, timedelta
+import uuid
+from datetime import datetime, date
 import extra_streamlit_components as stx
 
 # --- CONFIGURATION ---
@@ -13,14 +14,10 @@ st.set_page_config(page_title="Duty Tracker", page_icon="📋", layout="wide")
 # PASTE YOUR NEW DEPLOYMENT URL HERE
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzh46p4uBw3QDBk4_ObntV2FcPJxdb6PnmtFxjQ1EgbRB3svnHDV_kgAQ2wBbLE9Due/exec"
 
-# --- COOKIE MANAGER (For Persistent Login) ---
-@st.cache_resource(experimental_allow_widgets=True)
-def get_cookie_manager():
-    return stx.CookieManager()
+# --- COOKIE MANAGER ---
+cookie_manager = stx.CookieManager(key="duty_cookie_manager_v2")
 
-cookie_manager = get_cookie_manager()
-
-# --- AUTH & SESSION STATE ---
+# --- AUTH & SESSION STATE INITIALIZATION ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "email" not in st.session_state:
@@ -29,30 +26,33 @@ if "first_name" not in st.session_state:
     st.session_state.first_name = ""
 if "show_welcome_animation" not in st.session_state:
     st.session_state.show_welcome_animation = False
+if "just_logged_out" not in st.session_state:
+    st.session_state.just_logged_out = False
 
-# Auto-login check (reads cookies on app load)
-if not st.session_state.logged_in:
+# --- PERSISTENT LOGIN CHECK ---
+if not st.session_state.logged_in and not st.session_state.just_logged_out:
     saved_email = cookie_manager.get("duty_email")
     saved_name = cookie_manager.get("duty_name")
     if saved_email and saved_name:
         st.session_state.logged_in = True
         st.session_state.email = saved_email
         st.session_state.first_name = saved_name
-        st.session_state.show_welcome_animation = False # Skip animation on silent re-login
+        st.session_state.show_welcome_animation = True
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def logout():
-    # Clear session state
+    # Immediately flag state and clear session to ensure 1-click logout
     st.session_state.logged_in = False
     st.session_state.email = ""
     st.session_state.first_name = ""
     st.session_state.show_welcome_animation = False
-    # Clear browser cookies
-    cookie_manager.delete("duty_email")
-    cookie_manager.delete("duty_name")
-    time.sleep(0.5) # Give the browser a moment to delete the cookie
+    st.session_state.just_logged_out = True
+    
+    # Clear browser cookies securely
+    cookie_manager.delete("duty_email", key=f"del_e_{uuid.uuid4().hex}")
+    cookie_manager.delete("duty_name", key=f"del_n_{uuid.uuid4().hex}")
     st.rerun()
 
 # --- API HANDLERS ---
@@ -109,6 +109,9 @@ def delete_data_by_row(sheet_row):
 
 # --- UI: LOGIN / SIGNUP SCREEN ---
 if not st.session_state.logged_in:
+    # Reset logout guard once user lands back on login page
+    st.session_state.just_logged_out = False
+
     st.markdown("<h1 style='text-align: center; margin-top: 50px;'>Welcome to Duty Tracker App 📋</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: gray;'>Manage your everyday shifts securely</p>", unsafe_allow_html=True)
     st.write("")
@@ -125,17 +128,16 @@ if not st.session_state.logged_in:
                     with st.spinner("Authenticating..."):
                         res = authenticate("login", log_email, log_pass)
                         if res.get("status") == "success":
-                            # Update session state
                             st.session_state.logged_in = True
                             st.session_state.email = log_email.strip().lower()
                             st.session_state.first_name = res.get("first_name", "User")
                             st.session_state.show_welcome_animation = True
+                            st.session_state.just_logged_out = False
                             
-                            # Set persistent cookies (expires in 30 days)
-                            cookie_manager.set("duty_email", st.session_state.email, max_age=30*24*60*60)
-                            cookie_manager.set("duty_name", st.session_state.first_name, max_age=30*24*60*60)
+                            # Save persistent cookies (30 days)
+                            cookie_manager.set("duty_email", st.session_state.email, max_age=30*24*60*60, key=f"set_e_{uuid.uuid4().hex}")
+                            cookie_manager.set("duty_name", st.session_state.first_name, max_age=30*24*60*60, key=f"set_n_{uuid.uuid4().hex}")
                             
-                            time.sleep(0.5) # Wait briefly for cookie to register
                             st.rerun()
                         else:
                             st.error("Invalid email or password.")
@@ -162,9 +164,9 @@ if not st.session_state.logged_in:
 
 # --- UI: MAIN APPLICATION ---
 else:
-    # Trigger login animation exactly once after manual login
+    # Trigger smooth welcome animation exactly once on login
     if st.session_state.show_welcome_animation:
-        st.toast(f"Welcome back, {st.session_state.first_name}!", icon="🎉")
+        st.toast(f"Welcome back, {st.session_state.first_name}! 👋", icon="🎉")
         st.balloons()
         st.session_state.show_welcome_animation = False
 
@@ -248,7 +250,7 @@ else:
                         st.success("✅ Deleted!")
                         st.rerun()
 
-    # Footer Logout Button
+    # Footer Logout Button placed cleanly at the bottom right
     st.write("")
     st.write("")
     st.divider()

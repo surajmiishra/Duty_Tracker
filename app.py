@@ -11,11 +11,11 @@ import extra_streamlit_components as stx
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Duty Tracker", page_icon="📋", layout="wide")
 
-# PASTE YOUR NEW DEPLOYMENT URL HERE
+# PASTE YOUR DEPLOYMENT URL HERE
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzh46p4uBw3QDBk4_ObntV2FcPJxdb6PnmtFxjQ1EgbRB3svnHDV_kgAQ2wBbLE9Due/exec"
 
 # --- COOKIE MANAGER ---
-cookie_manager = stx.CookieManager(key="duty_cookie_manager_v2")
+cookie_manager = stx.CookieManager(key="duty_cookie_manager_v5")
 
 # --- AUTH & SESSION STATE INITIALIZATION ---
 if "logged_in" not in st.session_state:
@@ -43,14 +43,12 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def logout():
-    # Immediately flag state and clear session to ensure 1-click logout
     st.session_state.logged_in = False
     st.session_state.email = ""
     st.session_state.first_name = ""
     st.session_state.show_welcome_animation = False
     st.session_state.just_logged_out = True
     
-    # Clear browser cookies securely
     cookie_manager.delete("duty_email", key=f"del_e_{uuid.uuid4().hex}")
     cookie_manager.delete("duty_name", key=f"del_n_{uuid.uuid4().hex}")
     st.rerun()
@@ -109,7 +107,6 @@ def delete_data_by_row(sheet_row):
 
 # --- UI: LOGIN / SIGNUP SCREEN ---
 if not st.session_state.logged_in:
-    # Reset logout guard once user lands back on login page
     st.session_state.just_logged_out = False
 
     st.markdown("<h1 style='text-align: center; margin-top: 50px;'>Welcome to Duty Tracker App 📋</h1>", unsafe_allow_html=True)
@@ -134,7 +131,6 @@ if not st.session_state.logged_in:
                             st.session_state.show_welcome_animation = True
                             st.session_state.just_logged_out = False
                             
-                            # Save persistent cookies (30 days)
                             cookie_manager.set("duty_email", st.session_state.email, max_age=30*24*60*60, key=f"set_e_{uuid.uuid4().hex}")
                             cookie_manager.set("duty_name", st.session_state.first_name, max_age=30*24*60*60, key=f"set_n_{uuid.uuid4().hex}")
                             
@@ -164,13 +160,11 @@ if not st.session_state.logged_in:
 
 # --- UI: MAIN APPLICATION ---
 else:
-    # Trigger smooth welcome animation exactly once on login
     if st.session_state.show_welcome_animation:
         st.toast(f"Welcome back, {st.session_state.first_name}! 👋", icon="🎉")
         st.balloons()
         st.session_state.show_welcome_animation = False
 
-    # Top Welcome Header
     st.markdown(f"## Hi, {st.session_state.first_name}! 👋")
     st.caption(f"Logged in as: {st.session_state.email}")
     st.write("") 
@@ -196,62 +190,110 @@ else:
 
     with tab2:
         df = load_data()
-        col_title, col_btn = st.columns([0.85, 0.15])
-        col_title.subheader("Monthly Overview")
-        if col_btn.button("🔄 Refresh", use_container_width=True):
-            st.rerun()
         
+        # --- HEADER & DATE DROPDOWNS ---
+        head_col1, head_col2, head_col3 = st.columns([0.6, 0.2, 0.2])
+        with head_col1:
+            st.subheader("Monthly Duty Summary 💳")
+            
+        months_list = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        current_month_idx = datetime.now().month - 1
+        current_year = datetime.now().year
+        year_options = list(range(current_year, current_year + 10)) # Generates up to 10 upcoming years
+        
+        with head_col2:
+            selected_month_str = st.selectbox("Month", options=months_list, index=current_month_idx, label_visibility="collapsed")
+        with head_col3:
+            selected_year = st.selectbox("Year", options=year_options, index=0, label_visibility="collapsed")
+            
+        st.divider()
+
         if df.empty:
             st.info("No records found. Submit entries to see your dashboard.")
         else:
-            c_month, c_year = datetime.now().month, datetime.now().year
-            df_month = df[(df['Date'].dt.month == c_month) & (df['Date'].dt.year == c_year)]
+            month_num = months_list.index(selected_month_str) + 1
+            df_month = df[(df['Date'].dt.month == month_num) & (df['Date'].dt.year == selected_year)]
+
+            # --- SUMMARY CARD ---
+            with st.container(border=True):
+                st.markdown(f"### **{selected_month_str} {selected_year} Summary**")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Total Worked Shifts", len(df_month[df_month['Duty_Type'] != "Leave"]))
+                m2.metric("Regular Duties", len(df_month[df_month['Duty_Type'] == "Daily"]))
+                m3.metric("Overtime (OT)", len(df_month[df_month['Duty_Type'] == "OT (Overtime)"]))
+                m4.metric("Leaves", len(df_month[df_month['Duty_Type'] == "Leave"]))
+
+            st.write("")
             
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Regular Duties", len(df_month[df_month['Duty_Type'] == "Daily"]))
-            m2.metric("OTs", len(df_month[df_month['Duty_Type'] == "OT (Overtime)"]))
-            m3.metric("Leaves", len(df_month[df_month['Duty_Type'] == "Leave"]))
-            m4.metric("Total Shifts", len(df_month[df_month['Duty_Type'] != "Leave"]))
-            
+            # --- GRANULAR FILTERS SECTION ---
+            st.markdown("#### 🔍 Filter Duties")
+            f1, f2, f3 = st.columns(3)
+            with f1:
+                filter_type = st.selectbox("Duty Type Filter", options=["All", "Daily", "OT (Overtime)", "Leave"])
+            with f2:
+                filter_shift = st.selectbox("Shift Filter", options=["All", "A", "B", "C"])
+            with f3:
+                filter_post = st.selectbox("Post Filter", options=["All", "G7", "MG", "SY", "GMB", "Admin", "Other"])
+
+            df_filtered = df_month.copy()
+            if filter_type != "All":
+                df_filtered = df_filtered[df_filtered['Duty_Type'] == filter_type]
+            if filter_shift != "All":
+                df_filtered = df_filtered[df_filtered['Shift'] == filter_shift]
+            if filter_post != "All":
+                df_filtered = df_filtered[df_filtered['Post'] == filter_post]
+
             st.divider()
-            
+
+            # --- CHARTS & VISUALIZATIONS ---
             col_chart1, col_chart2 = st.columns(2)
             with col_chart1:
-                st.markdown("#### 🎯 Duty by Post")
-                df_worked = df_month[df_month['Duty_Type'] != "Leave"]
+                st.markdown("#### 🎯 Duty Breakdown by Post")
+                df_worked = df_filtered[df_filtered['Duty_Type'] != "Leave"]
                 if not df_worked.empty:
                     fig_post = px.pie(df_worked, names='Post', hole=0.4, color_discrete_sequence=px.colors.sequential.Teal)
-                    fig_post.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
+                    fig_post.update_layout(showlegend=True, margin=dict(t=10, b=10, l=10, r=10))
                     st.plotly_chart(fig_post, use_container_width=True)
+                else:
+                    st.caption("No duty post data available for selected filters.")
                 
             with col_chart2:
-                st.markdown("#### 📈 Activity Trend")
-                if not df_month.empty:
-                    daily_counts = df_month.groupby(['Date', 'Duty_Type']).size().reset_index(name='Count')
+                st.markdown("#### 📈 Monthly Shift Trends")
+                if not df_filtered.empty:
+                    daily_counts = df_filtered.groupby(['Date', 'Duty_Type']).size().reset_index(name='Count')
                     fig_trend = px.bar(daily_counts, x='Date', y='Count', color='Duty_Type', barmode='group')
-                    fig_trend.update_layout(xaxis_title="", yaxis_title="Shifts", margin=dict(t=0, b=0, l=0, r=0))
+                    fig_trend.update_layout(xaxis_title="", yaxis_title="Shifts", margin=dict(t=10, b=10, l=10, r=10))
                     st.plotly_chart(fig_trend, use_container_width=True)
-                
-            st.markdown("### 🗄️ Recent Records")
-            df_display = df.copy()
-            df_display['Date_Str'] = df_display['Date'].dt.strftime('%Y-%m-%d')
-            st.dataframe(
-                df_display.drop(columns=['Sheet_Row', 'Email', 'Timestamp', 'Date']).rename(columns={'Date_Str': 'Date'}).sort_values(by="Date", ascending=False).head(10), 
-                use_container_width=True, hide_index=True
-            )
+                else:
+                    st.caption("No shift activity available for selected filters.")
+
+            # --- FILTERED RECORDS TABLE ---
+            st.markdown(f"### 🗄️ Records for {selected_month_str} ({len(df_filtered)} found)")
+            if not df_filtered.empty:
+                df_display = df_filtered.copy()
+                df_display['Date_Str'] = df_display['Date'].dt.strftime('%Y-%m-%d')
+                st.dataframe(
+                    df_display.drop(columns=['Sheet_Row', 'Email', 'Timestamp', 'Date']).rename(columns={'Date_Str': 'Date'}).sort_values(by="Date", ascending=False), 
+                    use_container_width=True, hide_index=True
+                )
+            else:
+                st.warning("No records match your selected filters for this month.")
             
+            # --- REMOVE ENTRY SECTION ---
             st.markdown("#### 🗑️ Remove Entry")
-            del_ops = {f"{r['Date_Str']} | {r['Duty_Type']} | {r['Post']}": r['Sheet_Row'] for _, r in df_display.sort_values(by="Date", ascending=False).head(30).iterrows()}
-            if del_ops:
+            if not df_month.empty:
+                df_del_display = df_month.copy()
+                df_del_display['Date_Str'] = df_del_display['Date'].dt.strftime('%Y-%m-%d')
+                del_ops = {f"{r['Date_Str']} | {r['Duty_Type']} | {r['Post']}": r['Sheet_Row'] for _, r in df_del_display.sort_values(by="Date", ascending=False).iterrows()}
+                
                 cd1, cd2 = st.columns([0.8, 0.2])
-                sel_lbl = cd1.selectbox("Select:", list(del_ops.keys()), label_visibility="collapsed")
-                if cd2.button("Delete", type="primary", use_container_width=True):
+                sel_lbl = cd1.selectbox("Select entry to delete:", list(del_ops.keys()), label_visibility="collapsed")
+                if cd2.button("Delete Entry", type="primary", use_container_width=True):
                     if delete_data_by_row(del_ops[sel_lbl]).get("status") == "deleted":
-                        st.success("✅ Deleted!")
+                        st.success("✅ Entry deleted!")
                         st.rerun()
 
-    # Footer Logout Button placed cleanly at the bottom right
-    st.write("")
+    # Footer Logout Button
     st.write("")
     st.divider()
     col_space, col_logout = st.columns([0.85, 0.15])

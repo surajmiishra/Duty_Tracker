@@ -179,7 +179,7 @@ else:
                 duty_date = st.date_input("Date", value=date.today())
                 shift = st.selectbox("Shift", options=["A", "B", "C"])
             with col2:
-                post = st.selectbox("Post", options=["G7", "MG", "SY", "GMB", "Admin", "WH", "ADM", "MAU/G", "T/S PET", "TSP3", "GG", "F/AID", "T2", "CANTEEN", "FT", "INT", "GEN", "JEEP", "G2", "OTHER"])
+                post = st.selectbox("Post", options=["G7", "MG", "SY", "GMB", "Admin", "WH", "FIRE", "MAU/G", "T/S PET", "TSP3", "GG", "F/AID", "T2", "CANTEEN", "FT", "INT", "GEN", "JEEP", "G2", "OTHER"])
                 duty_type = st.radio("Duty Type", options=["Daily", "OT (Overtime)", "Leave"], horizontal=True)
                 
             submit = st.form_submit_button("Save Entry", use_container_width=True)
